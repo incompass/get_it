@@ -2,6 +2,8 @@ import 'package:test/test.dart';
 
 import 'package:get_it/get_it.dart';
 
+import 'async_test.dart';
+
 int constructorCounter = 0;
 int disposeCounter = 0;
 int errorCounter = 0;
@@ -477,6 +479,25 @@ void main() {
 
     expect(instance1 is TestClass, true);
   });
+
+  test(
+      'can register multiple singletons with instanceName and type and retrieve them with generic paramter name and type',
+      () {
+    final getIt = GetIt.instance;
+
+    getIt.registerSingleton(TestClass(),
+        instanceName: 'instanceName', registerInstanceNameByType: true);
+    getIt.registerSingleton(TestClass2(),
+        instanceName: 'instanceName', registerInstanceNameByType: true);
+
+    var instance1 = getIt.get<TestClass>(
+        instanceName: 'instanceName', instanceNameByType: true);
+    var instance2 = getIt.get<TestClass2>(
+        instanceName: 'instanceName', instanceNameByType: true);
+
+    expect(instance1 is TestClass && instance2 is TestClass2, true);
+  });
+
   test('register LazySingleton with lambda and factory function', () {
     GetIt.I.registerLazySingleton(() => SingletonInjector.configuration());
 

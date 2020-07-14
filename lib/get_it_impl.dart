@@ -221,6 +221,9 @@ class _GetItImplementation implements GetIt {
   final _factoriesByName =
       Map<String, _ServiceFactory<dynamic, dynamic, dynamic>>();
 
+  final _factoriesByNameAndType =
+      Map<Type, Map<String, _ServiceFactory<dynamic, dynamic, dynamic>>>();
+
   /// We still support a global ready signal mechanism for that we use this
   /// Completer.
   final _globalReadyCompleter = Completer();
@@ -231,7 +234,7 @@ class _GetItImplementation implements GetIt {
   bool allowReassignment = false;
 
   /// Is used by several other functions to retrieve the correct [_ServiceFactory]
-  _ServiceFactory _findFactoryByNameOrType<T>(String instanceName) {
+  _ServiceFactory _findFactoryByNameOrType<T>(String instanceName, {bool instanceNameByType}) {
     /// We use an assert here instead of an `if..throw` because it gets called on every call
     /// of [get]
     /// `(const Object() is! T)` tests if [T] is a real type and not Object or dynamic
@@ -241,7 +244,12 @@ class _GetItImplementation implements GetIt {
     );
 
     _ServiceFactory<T, dynamic, dynamic> instanceFactory;
-    if (instanceName != null) {
+    if (instanceName != null && (instanceNameByType ?? false)) {
+      instanceFactory = _factoriesByNameAndType[T][instanceName]
+          as _ServiceFactory<T, dynamic, dynamic>;
+      assert(instanceFactory != null,
+          "Object/factory with name $instanceName is not registered inside GetIt. Did you forget to register it?");
+    } else if (instanceName != null) {
       instanceFactory = _factoriesByName[instanceName]
           as _ServiceFactory<T, dynamic, dynamic>;
       assert(instanceFactory != null,
@@ -259,8 +267,8 @@ class _GetItImplementation implements GetIt {
   /// for factories you can pass up to 2 parameters [param1,param2] they have to match the types
   /// given at registration with [registerFactoryParam()]
   @override
-  T get<T>({String instanceName, dynamic param1, dynamic param2}) {
-    var instanceFactory = _findFactoryByNameOrType<T>(instanceName);
+  T get<T>({String instanceName, dynamic param1, dynamic param2, bool instanceNameByType}) {
+    var instanceFactory = _findFactoryByNameOrType<T>(instanceName, instanceNameByType: instanceNameByType);
 
     Object instance;
     if (instanceFactory.isAsync || instanceFactory.pendingResult != null) {
@@ -284,8 +292,8 @@ class _GetItImplementation implements GetIt {
 
   /// Callable class so that you can write `GetIt.instance<MyType>` instead of
   /// `GetIt.instance.get<MyType>`
-  T call<T>({String instanceName, dynamic param1, dynamic param2}) {
-    return get<T>(instanceName: instanceName, param1: param1, param2: param2);
+  T call<T>({String instanceName, dynamic param1, dynamic param2, bool instanceNameByType}) {
+    return get<T>(instanceName: instanceName, param1: param1, param2: param2, instanceNameByType: instanceNameByType);
   }
 
   /// Returns an Future of an instance that is created by an async factory or a Singleton that is
@@ -293,7 +301,7 @@ class _GetItImplementation implements GetIt {
   /// for async factories you can pass up to 2 parameters [param1,param2] they have to match the types
   /// given at registration with [registerFactoryParamAsync()]
   @override
-  Future<T> getAsync<T>({String instanceName, dynamic param1, dynamic param2}) {
+  Future<T> getAsync<T>({String instanceName, dynamic param1, dynamic param2, bool instanceNameByType}) {
     final factoryToGet = _findFactoryByNameOrType<T>(instanceName);
     return factoryToGet.getObjectAsync<T>(param1, param2);
   }
@@ -305,7 +313,7 @@ class _GetItImplementation implements GetIt {
   /// name instead of a type. This should only be necessary if you need to register more
   /// than one instance of one type. Its highly not recommended
   @override
-  void registerFactory<T>(FactoryFunc<T> func, {String instanceName}) {
+  void registerFactory<T>(FactoryFunc<T> func, {String instanceName, bool registerInstanceNameByType}) {
     _register<T, void, void>(
         type: _ServiceFactoryType.alwaysNew,
         instanceName: instanceName,
@@ -335,7 +343,7 @@ class _GetItImplementation implements GetIt {
   ///        => TestClassParam(param1:s);
   @override
   void registerFactoryParam<T, P1, P2>(FactoryFuncParam<T, P1, P2> func,
-      {String instanceName}) {
+      {String instanceName, bool registerInstanceNameByType}) {
     _register<T, P1, P2>(
         type: _ServiceFactoryType.alwaysNew,
         instanceName: instanceName,
@@ -348,7 +356,7 @@ class _GetItImplementation implements GetIt {
   /// so make the intention explicit
   @override
   void registerFactoryAsync<T>(FactoryFuncAsync<T> asyncFunc,
-      {String instanceName}) {
+      {String instanceName, bool registerInstanceNameByType}) {
     _register<T, void, void>(
         type: _ServiceFactoryType.alwaysNew,
         instanceName: instanceName,
@@ -380,7 +388,7 @@ class _GetItImplementation implements GetIt {
   @override
   void registerFactoryParamAsync<T, P1, P2>(
       FactoryFuncParamAsync<T, P1, P2> func,
-      {String instanceName}) {
+      {String instanceName, bool registerInstanceNameByType}) {
     _register<T, P1, P2>(
         type: _ServiceFactoryType.alwaysNew,
         instanceName: instanceName,
@@ -399,7 +407,7 @@ class _GetItImplementation implements GetIt {
   /// [registerLazySingleton] does not influence [allReady] however you can wait
   /// for and be dependent on a LazySingleton.
   @override
-  void registerLazySingleton<T>(FactoryFunc<T> func, {String instanceName}) {
+  void registerLazySingleton<T>(FactoryFunc<T> func, {String instanceName, bool registerInstanceNameByType}) {
     _register<T, void, void>(
         type: _ServiceFactoryType.lazy,
         instanceName: instanceName,
@@ -420,14 +428,15 @@ class _GetItImplementation implements GetIt {
   void registerSingleton<T>(
     T instance, {
     String instanceName,
-    bool signalsReady,
-  }) {
+    bool signalsReady, 
+    bool registerInstanceNameByType}) {
     _register<T, void, void>(
         type: _ServiceFactoryType.constant,
         instanceName: instanceName,
         instance: instance,
         isAsync: false,
-        shouldSignalReady: signalsReady ?? <T>[] is List<WillSignalReady>);
+        shouldSignalReady: signalsReady ?? <T>[] is List<WillSignalReady>,
+        registerInstanceNameByType: registerInstanceNameByType);
   }
 
   /// registers a type as Singleton by passing an factory function of that type
@@ -447,7 +456,8 @@ class _GetItImplementation implements GetIt {
     FactoryFunc<T> providerFunc, {
     String instanceName,
     Iterable<Type> dependsOn,
-    bool signalsReady,
+    bool signalsReady, 
+    bool registerInstanceNameByType
   }) {
     _register<T, void, void>(
         type: _ServiceFactoryType.constant,
@@ -478,7 +488,8 @@ class _GetItImplementation implements GetIt {
   void registerSingletonAsync<T>(FactoryFuncAsync<T> providerFunc,
       {String instanceName,
       Iterable<Type> dependsOn,
-      bool signalsReady}) {
+      bool signalsReady,
+      bool registerInstanceNameByType}) {
     _register<T, void, void>(
         type: _ServiceFactoryType.constant,
         instanceName: instanceName,
@@ -505,7 +516,7 @@ class _GetItImplementation implements GetIt {
   /// for and be dependent on a LazySingleton.
   @override
   void registerLazySingletonAsync<T>(FactoryFuncAsync<T> func,
-      {String instanceName}) {
+      {String instanceName, bool registerInstanceNameByType}) {
     _register<T, void, void>(
         isAsync: true,
         type: _ServiceFactoryType.lazy,
@@ -532,6 +543,7 @@ class _GetItImplementation implements GetIt {
     @required bool isAsync,
     Iterable<Type> dependsOn,
     @required bool shouldSignalReady,
+    bool registerInstanceNameByType,
   }) {
     
     throwIf(
@@ -540,10 +552,19 @@ class _GetItImplementation implements GetIt {
     );
 
     throwIf(
-      (instanceName != null &&
+        ((registerInstanceNameByType ?? false) &&
+            instanceName != null &&
+            (_factoriesByNameAndType.containsKey(T) &&
+                _factoriesByNameAndType[T].containsKey(instanceName) &&
+                !allowReassignment)),
+        ArgumentError("An object of name $instanceName is already registered"));
+
+    throwIf(
+      (!(registerInstanceNameByType ?? false) && instanceName != null &&
           (_factoriesByName.containsKey(instanceName) && !allowReassignment)),
       ArgumentError("An object of name $instanceName is already registered"),
     );
+
     throwIf(
         (instanceName == null &&
             _factories.containsKey(T) &&
@@ -562,7 +583,12 @@ class _GetItImplementation implements GetIt {
       shouldSignalReady: shouldSignalReady,
     );
 
-    if (instanceName == null) {
+    if (instanceName != null && (registerInstanceNameByType ?? false)) {
+      if (_factoriesByNameAndType[T] == null) {
+        _factoriesByNameAndType[T] = Map<String, _ServiceFactory<T, dynamic, dynamic>>();
+      }
+      _factoriesByNameAndType[T][instanceName] = serviceFactory;
+    } else if (instanceName == null) {
       _factories[T] = serviceFactory;
     } else {
       _factoriesByName[instanceName] = serviceFactory;
@@ -659,13 +685,13 @@ class _GetItImplementation implements GetIt {
   /// Tests if an [instance] of an object or aType [T] or a name [instanceName]
   /// is registered inside GetIt
   @override
-  bool isRegistered<T>({Object instance, String instanceName}) {
+  bool isRegistered<T>({Object instance, String instanceName, bool instanceNameByType}) {
     _ServiceFactory factoryToCheck;
     try {
       if (instance != null) {
         factoryToCheck = _findFactoryByInstance(instance);
       } else {
-        factoryToCheck = _findFactoryByNameOrType<T>(instanceName);
+        factoryToCheck = _findFactoryByNameOrType<T>(instanceName, instanceNameByType: instanceNameByType);
       }
     } on StateError {
       return false;
@@ -682,12 +708,12 @@ class _GetItImplementation implements GetIt {
   void unregister<T>(
       {Object instance,
       String instanceName,
-      void Function(T) disposingFunction}) {
+      void Function(T) disposingFunction, bool registerInstanceNameByType}) {
     _ServiceFactory factoryToRemove;
     if (instance != null) {
       factoryToRemove = _findFactoryByInstance(instance);
     } else {
-      factoryToRemove = _findFactoryByNameOrType<T>(instanceName);
+      factoryToRemove = _findFactoryByNameOrType<T>(instanceName, instanceNameByType: registerInstanceNameByType);
     }
 
     throwIf(
@@ -717,13 +743,13 @@ class _GetItImplementation implements GetIt {
   void resetLazySingleton<T>(
       {Object instance,
       String instanceName,
-      void Function(T) disposingFunction}) {
+      void Function(T) disposingFunction, bool registerInstanceNameByType}) {
     _ServiceFactory instanceFactory;
 
     if (instance != null) {
       instanceFactory = _findFactoryByInstance(instance);
     } else {
-      instanceFactory = _findFactoryByNameOrType<T>(instanceName);
+      instanceFactory = _findFactoryByNameOrType<T>(instanceName, instanceNameByType: registerInstanceNameByType);
     }
     throwIfNot(
         instanceFactory.factoryType == _ServiceFactoryType.lazy,
@@ -741,6 +767,12 @@ class _GetItImplementation implements GetIt {
   _ServiceFactory _findFactoryByInstance(Object instance) {
     var registeredFactories = _factories.values
         .followedBy(_factoriesByName.values)
+        .followedBy(_factoriesByNameAndType.values
+            .fold<List<_ServiceFactory<dynamic, dynamic, dynamic>>>(
+                List<_ServiceFactory<dynamic, dynamic, dynamic>>(),
+                (List<_ServiceFactory<dynamic, dynamic, dynamic>> previousValue,
+                        element) =>
+                    previousValue..addAll(element.values)))
         .where((x) => identical(x.instance, instance));
 
     throwIf(
@@ -835,6 +867,12 @@ class _GetItImplementation implements GetIt {
     FutureGroup futures = FutureGroup();
     _factories.values
         .followedBy(_factoriesByName.values)
+        .followedBy(_factoriesByNameAndType.values
+            .fold<List<_ServiceFactory<dynamic, dynamic, dynamic>>>(
+                List<_ServiceFactory<dynamic, dynamic, dynamic>>(),
+                (List<_ServiceFactory<dynamic, dynamic, dynamic>> previousValue,
+                        element) =>
+                    previousValue..addAll(element.values)))
         .where((x) => ((x.isAsync && !ignorePendingAsyncCreation ||
                 (!x.isAsync &&
                     x.pendingResult != null) || // Singletons with dependencies
@@ -859,6 +897,12 @@ class _GetItImplementation implements GetIt {
   bool allReadySync([bool ignorePendingAsyncCreation = false]) {
     final notReadyTypes = _factories.values
         .followedBy(_factoriesByName.values)
+        .followedBy(_factoriesByNameAndType.values
+            .fold<List<_ServiceFactory<dynamic, dynamic, dynamic>>>(
+                List<_ServiceFactory<dynamic, dynamic, dynamic>>(),
+                (List<_ServiceFactory<dynamic, dynamic, dynamic>> previousValue,
+                        element) =>
+                    previousValue..addAll(element.values)))
         .where((x) => ((x.isAsync && !ignorePendingAsyncCreation ||
                     (!x.isAsync &&
                         x.pendingResult !=
@@ -891,7 +935,13 @@ class _GetItImplementation implements GetIt {
   /// the other a List. As this function just throws an exception and doesn't return anything
   /// this is save
   List _throwTimeoutError() {
-    final allFactories = _factories.values.followedBy(_factoriesByName.values);
+    final allFactories = _factories.values.followedBy(_factoriesByName.values)
+      ..followedBy(_factoriesByNameAndType.values
+          .fold<List<_ServiceFactory<dynamic, dynamic, dynamic>>>(
+              List<_ServiceFactory<dynamic, dynamic, dynamic>>(),
+              (List<_ServiceFactory<dynamic, dynamic, dynamic>> previousValue,
+                      element) =>
+                  previousValue..addAll(element.values)));
     final waitedBy = Map.fromEntries(
       allFactories
           .where((x) =>
@@ -932,12 +982,13 @@ class _GetItImplementation implements GetIt {
     String instanceName,
     Duration timeout,
     Object callee,
+    bool instanceNameByType,
   }) {
     _ServiceFactory factoryToCheck;
     if (instance != null) {
       factoryToCheck = _findFactoryByInstance(instance);
     } else {
-      factoryToCheck = _findFactoryByNameOrType<T>(instanceName);
+      factoryToCheck = _findFactoryByNameOrType<T>(instanceName, instanceNameByType: instanceNameByType);
     }
     throwIfNot(
       factoryToCheck.canBeWaitedFor &&
@@ -971,12 +1022,12 @@ class _GetItImplementation implements GetIt {
   /// Checks if an async Singleton defined by an [instance], a type [T] or an [instanceName]
   /// is ready without waiting.
   @override
-  bool isReadySync<T>({Object instance, String instanceName}) {
+  bool isReadySync<T>({Object instance, String instanceName, bool instanceNameByType,}) {
     _ServiceFactory factoryToCheck;
     if (instance != null) {
       factoryToCheck = _findFactoryByInstance(instance);
     } else {
-      factoryToCheck = _findFactoryByNameOrType<T>(instanceName);
+      factoryToCheck = _findFactoryByNameOrType<T>(instanceName, instanceNameByType: instanceNameByType);
     }
     throwIfNot(
         factoryToCheck.canBeWaitedFor &&

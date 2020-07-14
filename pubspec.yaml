@@ -16,5 +16,5 @@ dependencies:
   meta: ^1.1.0
 
 dev_dependencies:
-  test: 
+  test:
   lint: 1.1.1
